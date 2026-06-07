@@ -1,12 +1,12 @@
 /**
  * services/ticketService.js — Unique ticket code generator
  *
- * Generates codes in the format: EVT-YYYY-XXXX
- * where YYYY = current year, XXXX = random 4-char uppercase alphanumeric.
+ * Generates codes in the format: EVT-YYYY-XXXXXXXXXXXX
+ * where YYYY = current year, XXXXXXXXXXXX = random 12-char uppercase alphanumeric.
  *
+ * 36^12 ≈ 4.7 × 10¹⁸ possible combinations — virtually impossible to brute-force.
  * Uses crypto.randomBytes for cryptographically strong randomness.
- * Checks the DB for collisions before returning a code (extremely unlikely
- * but enforced for correctness).
+ * Checks the DB for collisions before returning a code.
  */
 
 'use strict';
@@ -15,13 +15,15 @@ const crypto = require('crypto');
 const pool   = require('../config/db');
 
 const CHARSET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const CODE_LENGTH = 12; // 12-char random suffix
 
 /**
- * Generates a random 4-character alphanumeric suffix.
+ * Generates a random CODE_LENGTH-character alphanumeric suffix
+ * using cryptographically secure randomness.
  * @returns {string}
  */
 function randomSuffix() {
-  const bytes = crypto.randomBytes(4);
+  const bytes = crypto.randomBytes(CODE_LENGTH);
   return Array.from(bytes)
     .map((b) => CHARSET[b % CHARSET.length])
     .join('');
@@ -32,7 +34,7 @@ function randomSuffix() {
  * Retries up to 10 times on collision (collision probability is negligible
  * but we handle it gracefully).
  *
- * @returns {Promise<string>} e.g. "EVT-2026-A3F7"
+ * @returns {Promise<string>} e.g. "EVT-2026-A3F7K9X2R4M8"
  */
 async function generateTicketCode() {
   const year = new Date().getFullYear();
@@ -58,3 +60,4 @@ async function generateTicketCode() {
 }
 
 module.exports = { generateTicketCode };
+
