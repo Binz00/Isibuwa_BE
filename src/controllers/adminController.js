@@ -105,7 +105,7 @@ async function listBookings(req, res, next) {
       `SELECT
          b.id, b.name, b.email, b.phone, b.district, b.payment_reference, b.status,
          b.submitted_at, b.reviewed_at, b.event_id,
-         t.ticket_code
+         t.ticket_code, t.checked_in_at
        FROM bookings b
        LEFT JOIN tickets t ON t.booking_id = b.id
        ${where}
@@ -141,7 +141,7 @@ async function getBooking(req, res, next) {
       `SELECT
          b.id, b.name, b.email, b.phone, b.district, b.payment_reference, b.status,
          b.payment_slip_url, b.submitted_at, b.reviewed_at, b.event_id,
-         t.ticket_code, t.issued_at
+         t.ticket_code, t.issued_at, t.checked_in_at
        FROM bookings b
        LEFT JOIN tickets t ON t.booking_id = b.id
        WHERE b.id = $1`,
@@ -341,7 +341,13 @@ async function getStats(req, res, next) {
        FROM bookings`
     );
 
+    // Count checked-in attendees
+    const checkinResult = await pool.query(
+      `SELECT COUNT(*) AS checked_in FROM tickets WHERE checked_in_at IS NOT NULL`
+    );
+
     const { total, pending, approved, rejected, non_rejected } = result.rows[0];
+    const checked_in = parseInt(checkinResult.rows[0].checked_in, 10);
     const remaining_capacity = Math.max(0, 150 - parseInt(non_rejected, 10));
 
     return res.json({
@@ -349,6 +355,7 @@ async function getStats(req, res, next) {
       pending:            parseInt(pending,  10),
       approved:           parseInt(approved, 10),
       rejected:           parseInt(rejected, 10),
+      checked_in,
       remaining_capacity,
     });
   } catch (err) {
@@ -366,4 +373,74 @@ function logout(_req, res) {
   return res.json({ message: 'Logged out successfully' });
 }
 
-module.exports = { login, listBookings, getBooking, approveBooking, rejectBooking, getStats, logout };
+// ── checkinBooking ───────────────────────────────────────────
+
+/**
+ * PATCH /api/admin/bookings/:id/checkin
+ * Marks an approved booking as checked-in at the gate.
+ * Uses row-level locking to prevent double check-ins.
+ */
+async function checkinBooking(req, res, next) {
+  const { id } = req.params;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Fetch booking with ticket, locking the ticket row
+    const result = await client.query(
+      `SELECT b.id, b.name, b.status, t.id AS ticket_id, t.ticket_code, t.checked_in_at
+       FROM bookings b
+       LEFT JOIN tickets t ON t.booking_id = b.id
+       WHERE b.id = $1
+       FOR UPDATE OF b`,
+      [id]
+    );
+
+    if (!result.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    const booking = result.rows[0];
+
+    if (booking.status !== 'approved') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: `Cannot check in: booking is ${booking.status}, not approved`,
+      });
+    }
+
+    if (!booking.ticket_id) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'No ticket found for this booking' });
+    }
+
+    if (booking.checked_in_at) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: `Already checked in at ${new Date(booking.checked_in_at).toLocaleString()}`,
+      });
+    }
+
+    // Mark as checked in
+    await client.query(
+      'UPDATE tickets SET checked_in_at = NOW() WHERE id = $1',
+      [booking.ticket_id]
+    );
+
+    await client.query('COMMIT');
+
+    return res.json({
+      message: `${booking.name} has been checked in successfully`,
+      ticket_code: booking.ticket_code,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    next(err);
+  } finally {
+    client.release();
+  }
+}
+
+module.exports = { login, listBookings, getBooking, approveBooking, rejectBooking, checkinBooking, getStats, logout };

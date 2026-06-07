@@ -17,6 +17,7 @@ const {
   getBooking,
   approveBooking,
   rejectBooking,
+  checkinBooking,
   getStats,
   logout,
 } = require('../controllers/adminController');
@@ -42,5 +43,6 @@ router.get('/bookings',               auth, listBookings);
 router.get('/bookings/:id',           auth, getBooking);
 router.patch('/bookings/:id/approve', auth, approveBooking);
 router.patch('/bookings/:id/reject',  auth, rejectBooking);
+router.patch('/bookings/:id/checkin', auth, checkinBooking);
 
 module.exports = router;

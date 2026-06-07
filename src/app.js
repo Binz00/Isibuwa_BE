@@ -79,4 +79,4 @@ app.listen(PORT, () => {
   console.log(`🚀 Isibuwa API running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
 });
 
-module.exports = app;
+module.exports = app; // Trigger nodemon restart
